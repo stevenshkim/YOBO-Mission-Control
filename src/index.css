@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --live: #00e07a;
+  --bad: #ff3b30;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: #ffffff;
+}
+
+body {
+  font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: 'ss01', 'ss02', 'tnum';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Tabular figures for all numeric data so columns line up */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hide scrollbars on the horizontal KPI rail (mobile) */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+/* Subtle dotted divider used for "data → logic → action" cuts */
+.dotted-rule {
+  background-image: radial-gradient(circle, #c9c9c9 1px, transparent 1px);
+  background-size: 6px 1px;
+  background-repeat: repeat-x;
+  background-position: left center;
+  height: 1px;
+}
+
+/* Pulse for live status dot */
+@keyframes livepulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 224, 122, 0.55); }
+  50%      { box-shadow: 0 0 0 6px rgba(0, 224, 122, 0); }
+}
+.dot-live {
+  animation: livepulse 2.2s ease-in-out infinite;
+}
