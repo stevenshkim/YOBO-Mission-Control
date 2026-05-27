@@ -425,7 +425,7 @@ function YoboMark({ size = 22 }) {
 /* Header                                                                     */
 /* -------------------------------------------------------------------------- */
 
-function Header({ period, setPeriod, region, setRegion }) {
+function Header({ period, setPeriod, region, setRegion, route, setRoute }) {
   const periods = ['Today', '7d', '30d', '90d', 'YTD'];
   const regions = ['All', 'ID', 'SG', 'MY', 'US'];
   const now = new Date();
@@ -455,6 +455,26 @@ function Header({ period, setPeriod, region, setRegion }) {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          {setRoute && (
+            <div className="flex items-center gap-1 rounded-full border border-ink-100 bg-ink-50 p-0.5">
+              <button
+                onClick={() => setRoute('/')}
+                className={`rounded-full px-3 py-1 text-[11px] font-medium tracking-wide transition ${
+                  route === '/' ? 'bg-ink-900 text-ink-0' : 'text-ink-600 hover:text-ink-900'
+                }`}
+              >
+                Mission Control
+              </button>
+              <button
+                onClick={() => setRoute('/us')}
+                className={`rounded-full px-3 py-1 text-[11px] font-medium tracking-wide transition ${
+                  route === '/us' ? 'bg-ink-900 text-ink-0' : 'text-ink-600 hover:text-ink-900'
+                }`}
+              >
+                US Stack
+              </button>
+            </div>
+          )}
           <Segmented value={period} options={periods} onChange={setPeriod} icon="cal" />
           <Segmented value={region} options={regions} onChange={setRegion} icon="globe" />
         </div>
@@ -1110,7 +1130,7 @@ function Modal({ title, subtitle, onClose, wide, children }) {
 /* Top-level                                                                  */
 /* -------------------------------------------------------------------------- */
 
-export default function MissionControl() {
+export default function MissionControl({ route, setRoute } = {}) {
   const [period, setPeriod] = useState('30d');
   const [region, setRegion] = useState('All');
   const [openKpi, setOpenKpi] = useState(null);
@@ -1118,7 +1138,14 @@ export default function MissionControl() {
 
   return (
     <div className="min-h-screen bg-ink-0 text-ink-900 font-sans">
-      <Header period={period} setPeriod={setPeriod} region={region} setRegion={setRegion} />
+      <Header
+        period={period}
+        setPeriod={setPeriod}
+        region={region}
+        setRegion={setRegion}
+        route={route}
+        setRoute={setRoute}
+      />
 
       <main className="mx-auto max-w-[1440px] space-y-12 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
         <Layer1 onOpenBreakdown={setOpenKpi} />
