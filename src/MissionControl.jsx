@@ -23,12 +23,12 @@ import {
 } from 'lucide-react';
 
 /* ============================================================================
- * YOBO Labs — Mission Control
- * Single-page React cockpit. Monochrome + #00E07A (live) + #FF3B30 (broken).
- * No other colors are permitted anywhere in this file.
+ * YoboLabs — Mission Control
+ * Single-page React cockpit. Brand palette: #6FED45 (live) + #000000 (ink)
+ * + #FFFFFF (canvas) + #FF3B30 reserved for the "broken" semantic state only.
  * ========================================================================== */
 
-const COLOR = { live: '#00E07A', bad: '#FF3B30', ink: '#0A0A0A', mid: '#686868', faint: '#C9C9C9' };
+const COLOR = { live: '#6FED45', bad: '#FF3B30', ink: '#000000', mid: '#686868', faint: '#C9C9C9' };
 
 /* -------------------------------------------------------------------------- */
 /* Mock data — calibrated to ~$1.3M ARR, ~40 brands, ~800 outlets, multi-region */
@@ -411,12 +411,17 @@ function DualBar({ current, target, unit = '', healthy = true }) {
   );
 }
 
-function YoboMark({ size = 22 }) {
+function YoboMark({ size = 28, variant = 'light' }) {
+  // light-bg variant = black tile + green mark (the dashboard default).
+  // dark-bg variant  = green tile + black mark (per brand guide page 4).
+  const tile = variant === 'dark' ? COLOR.live : COLOR.ink;
+  const mark = variant === 'dark' ? COLOR.ink : COLOR.live;
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" fill="none" aria-hidden>
-      <circle cx="20" cy="32" r="6" stroke={COLOR.ink} strokeWidth="2.4" />
-      <line x1="32" y1="14" x2="22" y2="50" stroke={COLOR.ink} strokeWidth="2.4" strokeLinecap="round" />
-      <path d="M44 38 L52 26 L36 26 Z" stroke={COLOR.live} strokeWidth="2.4" strokeLinejoin="round" />
+      <rect width="64" height="64" rx="12" fill={tile} />
+      <line x1="50" y1="13" x2="14" y2="51" stroke={mark} strokeWidth="7" strokeLinecap="round" />
+      <circle cx="19" cy="20" r="5" fill={mark} />
+      <path d="M45 50 L52 36 L38 50 Z" fill={mark} />
     </svg>
   );
 }
@@ -440,10 +445,13 @@ function Header({ period, setPeriod, region, setRegion }) {
     <header className="sticky top-0 z-30 border-b border-ink-100 bg-ink-0/90 backdrop-blur">
       <div className="mx-auto flex max-w-[1440px] items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
         <div className="flex items-center gap-2.5">
-          <YoboMark />
+          <YoboMark size={32} />
           <div className="leading-none">
-            <div className="text-[15px] font-bold tracking-tight">YOBO Labs</div>
-            <div className="text-[10px] uppercase tracking-wider text-ink-400">Mission Control</div>
+            <div className="text-[18px] tracking-tight text-ink-900">
+              <span className="font-brandYobo">Yobo</span>
+              <span className="font-brandLabs font-medium">Labs</span>
+            </div>
+            <div className="mt-1 text-[10px] uppercase tracking-wider text-ink-400">Mission Control</div>
           </div>
         </div>
 
@@ -1130,8 +1138,8 @@ export default function MissionControl() {
         <footer className="border-t border-ink-100 pt-6 text-[11px] uppercase tracking-wider text-ink-400">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <YoboMark size={14} />
-              <span>YOBO Labs · Mission Control</span>
+              <YoboMark size={16} />
+              <span>YoboLabs · Mission Control</span>
             </div>
             <div>
               Set <span className="text-ink-900">●</span> · Run <span className="text-ink-900">/</span> · Win{' '}

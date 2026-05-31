@@ -4,7 +4,7 @@
 
 :root {
   color-scheme: light;
-  --live: #00e07a;
+  --live: #6fed45;
   --bad: #ff3b30;
 }
 
@@ -16,8 +16,8 @@ body,
 }
 
 body {
-  font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
-  font-feature-settings: 'ss01', 'ss02', 'tnum';
+  font-family: 'Satoshi', ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: 'tnum';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -46,8 +46,8 @@ body {
 
 /* Pulse for live status dot */
 @keyframes livepulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 224, 122, 0.55); }
-  50%      { box-shadow: 0 0 0 6px rgba(0, 224, 122, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(111, 237, 69, 0.55); }
+  50%      { box-shadow: 0 0 0 6px rgba(111, 237, 69, 0); }
 }
 .dot-live {
   animation: livepulse 2.2s ease-in-out infinite;

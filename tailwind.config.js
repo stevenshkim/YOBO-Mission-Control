@@ -4,8 +4,9 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['"Space Grotesk"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+        sans: ['Satoshi', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        brandYobo: ['Righteous', 'Satoshi', 'sans-serif'],
+        brandLabs: ['Comfortaa', 'Satoshi', 'sans-serif'],
       },
       colors: {
         ink: {
@@ -16,9 +17,9 @@ export default {
           400: '#686868',
           600: '#3A3A3A',
           800: '#1C1C1C',
-          900: '#0A0A0A',
+          900: '#000000',
         },
-        live: '#00E07A',
+        live: '#6FED45',
         bad: '#FF3B30',
       },
       letterSpacing: {
