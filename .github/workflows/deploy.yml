@@ -35,7 +35,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          BASE_PATH: /yobo-mission-control/
+          BASE_PATH: /YOBO-Mission-Control/
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
