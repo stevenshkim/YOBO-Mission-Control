@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { buildSeed, loadState, saveState, clearState, timeFraction } from './data.js';
 
 /* ============================================================================
  * YoboLabs Mission KPIs
@@ -33,8 +34,6 @@ const PERIODS = [
   { id: '90d', label: '90D' },
   { id: 'qtd', label: 'QTD' },
 ];
-
-const THRESHOLD = { good: 50, bad: 20 };
 
 /* -------------------------------------------------------------------------- */
 /* Format + parse                                                             */
@@ -110,6 +109,34 @@ function splitToRegions(m, newCombined) {
   return { id: newId, us: newCombined - newId };
 }
 
+function applyEdit(m, region, newVal) {
+  if (m.kind === 'ratio') {
+    m[region] = newVal;
+    return;
+  }
+  if (region === 'combined') {
+    const split = splitToRegions(m, newVal);
+    m.id = split.id;
+    m.us = split.us;
+  } else {
+    m[region] = newVal;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Stage label resolution (ROI stage derives from config)                     */
+/* -------------------------------------------------------------------------- */
+
+function stageLabel(stage, config) {
+  if (stage.roiStage) return `${config.roiMultiple}x ROI`;
+  return stage.label;
+}
+
+function stageSource(stage, config) {
+  if (stage.roiStage) return `Driving ${config.roiMultiple}x monthly cost in sales`;
+  return stage.source;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Delta + conv                                                               */
 /* -------------------------------------------------------------------------- */
@@ -136,10 +163,10 @@ function deltaText(d) {
   return `${sign}${d.pct.toFixed(1)}%`;
 }
 
-function convColor(pct) {
+function convColor(pct, config) {
   if (pct === null || pct === undefined) return C.dim;
-  if (pct >= THRESHOLD.good) return C.green;
-  if (pct < THRESHOLD.bad) return C.red;
+  if (pct >= config.convGood) return C.green;
+  if (pct < config.convBad) return C.red;
   return C.dim;
 }
 
@@ -152,12 +179,33 @@ function stageWasDeclining(trend) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Pace vs target (SPEC 7.3)                                                  */
+/* -------------------------------------------------------------------------- */
+
+/* Stock and ratio metrics compare level to target directly. Flow metrics
+ * compare accrual to the elapsed share of the target. */
+function paceInfo(metric, target, region, period) {
+  if (!target) return null;
+  const targetVal = metricVal(target, region);
+  if (!targetVal) return null;
+  const actual = metricVal(metric, region);
+  const frac = metric.kind === 'ratio' || metric.stock ? 1 : timeFraction(period);
+  const expected = targetVal * frac;
+  if (expected <= 0) return null;
+  const pace = Math.round((actual / expected) * 100);
+  const status = pace >= 110 ? 'ahead' : pace >= 95 ? 'on track' : pace >= 80 ? 'watch' : 'behind';
+  return { targetVal, pace, status };
+}
+
+const PACE_COLOR = { ahead: null, 'on track': null, watch: C.amber, behind: C.red };
+
+/* -------------------------------------------------------------------------- */
 /* Auto-suggestion                                                            */
 /* -------------------------------------------------------------------------- */
 
-function autoSuggest(funnel, region) {
+function autoSuggest(funnel, region, config) {
   const stages = funnel.stages.map((s) => ({
-    label: s.label,
+    label: stageLabel(s, config),
     val: metricVal(s, region),
     trend: metricTrend(s, region),
   }));
@@ -186,7 +234,7 @@ function autoSuggest(funnel, region) {
   if (stalled.length > 0) {
     return { status: 'red', text: `${stalled[0].to} stalled at zero. Investigate handoff.` };
   }
-  if (weakest && weakest.conv < THRESHOLD.bad) {
+  if (weakest && weakest.conv < config.convBad) {
     const stuck = Math.max(0, weakest.prevVal - weakest.val);
     return {
       status: 'red',
@@ -212,148 +260,6 @@ function autoSuggest(funnel, region) {
 }
 
 const STATUS_COLOR = { green: C.green, amber: C.amber, red: C.red };
-
-/* -------------------------------------------------------------------------- */
-/* Mock data                                                                  */
-/* -------------------------------------------------------------------------- */
-
-function mkTrend(target, growth = 0.04, n = 8, seed = 1) {
-  let s = seed;
-  const rand = () => {
-    s = (s * 9301 + 49297) % 233280;
-    return s / 233280;
-  };
-  const start = target / Math.pow(1 + growth, n - 1);
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    const base = start * Math.pow(1 + growth, i);
-    const wiggle = base * 0.07 * (rand() * 2 - 1);
-    out.push(Math.max(0, Math.round(base + wiggle)));
-  }
-  out[n - 1] = target;
-  return out;
-}
-
-const T = (target, growth, seed) => mkTrend(target, growth, 8, seed);
-
-function buildSeed() {
-  return {
-    northStar: {
-      arr: {
-        key: 'arr', label: 'ARR', format: 'money-arr', kind: 'sum',
-        id: 336000, us: 144000,
-        trend: { id: T(336000, 0.035, 11), us: T(144000, 0.045, 12) },
-      },
-      newMrr: {
-        key: 'newMrr', label: 'New MRR', format: 'money', kind: 'sum',
-        id: 7200, us: 4800,
-        trend: { id: T(7200, 0.06, 21), us: T(4800, 0.08, 22) },
-      },
-      activeCustomers: {
-        key: 'activeCustomers', label: 'Active customers', format: 'int', kind: 'sum',
-        id: 26, us: 12,
-        trend: { id: T(26, 0.05, 31), us: T(12, 0.07, 32) },
-      },
-      nrr: {
-        key: 'nrr', label: 'NRR', format: 'pct', kind: 'ratio',
-        id: 114, us: 108, combined: 112,
-        trend: {
-          id: T(114, 0.01, 41),
-          us: T(108, 0.005, 42),
-          combined: T(112, 0.008, 43),
-        },
-      },
-    },
-    acquisition: {
-      key: 'acquisition',
-      title: 'Acquisition',
-      question: 'Are we filling the top?',
-      override: '',
-      stages: [
-        { key: 'leads', label: 'Leads', source: 'CRM, top-of-funnel inquiries', format: 'int', kind: 'sum',
-          id: 196, us: 88, trend: { id: T(196, 0.03, 101), us: T(88, 0.04, 102) } },
-        { key: 'mql', label: 'MQL', source: 'Marketing-qualified, fits ICP', format: 'int', kind: 'sum',
-          id: 64, us: 31, trend: { id: T(64, 0.025, 103), us: T(31, 0.03, 104) } },
-        { key: 'signups', label: 'Signups', source: 'Product DB, created account', format: 'int', kind: 'sum',
-          id: 18, us: 6, trend: { id: T(18, 0.04, 105), us: T(6, 0.05, 106) } },
-      ],
-    },
-    activation: {
-      key: 'activation',
-      title: 'Activation',
-      question: 'Are new customers reaching first value?',
-      override: '',
-      stages: [
-        { key: 'signups', label: 'Signups', source: 'Product DB', format: 'int', kind: 'sum',
-          id: 18, us: 6, trend: { id: T(18, 0.04, 201), us: T(6, 0.05, 202) } },
-        { key: 'connected', label: 'Connected', source: 'Shopify + Klaviyo + POS flowing', format: 'int', kind: 'sum',
-          id: 14, us: 5, trend: { id: T(14, 0.04, 203), us: T(5, 0.04, 204) } },
-        { key: 'launched', label: 'First launch', source: 'YoboLabs pushed first flow', format: 'int', kind: 'sum',
-          id: 12, us: 4, trend: { id: T(12, 0.05, 205), us: T(4, 0.04, 206) } },
-        { key: 'sent', label: 'First sent', source: 'Klaviyo sent first message', format: 'int', kind: 'sum',
-          id: 10, us: 4, trend: { id: T(10, 0.04, 207), us: T(4, 0.04, 208) } },
-      ],
-    },
-    revenue: {
-      key: 'revenue',
-      title: 'Revenue',
-      question: 'Are we paid and proving ROI?',
-      roiLabel: '3x ROI',
-      override: '',
-      stages: [
-        { key: 'card', label: 'Card on file', source: 'Stripe, payment method added', format: 'int', kind: 'sum',
-          id: 16, us: 6, trend: { id: T(16, 0.05, 301), us: T(6, 0.04, 302) } },
-        { key: 'firstPay', label: 'First payment', source: 'Stripe, first charge succeeded', format: 'int', kind: 'sum',
-          id: 14, us: 5, trend: { id: T(14, 0.045, 303), us: T(5, 0.04, 304) } },
-        { key: 'roi', label: '3x ROI', source: 'Driving 3x monthly cost in sales', format: 'int', kind: 'sum',
-          id: 7, us: 2, trend: { id: T(7, 0.05, 305), us: T(2, 0.04, 306) } },
-        { key: 'upgrade', label: 'Upgrades', source: 'Stripe, tier expansion', format: 'int', kind: 'sum',
-          id: 3, us: 1, trend: { id: T(3, 0.06, 307), us: T(1, 0.05, 308) } },
-      ],
-    },
-    cs: {
-      key: 'cs',
-      title: 'Customer Success',
-      subtitle: 'Are paying customers active and getting results?',
-      scope: 'Last 4 weeks, distinct customer-weeks',
-      override: '',
-      milestoneStage: 0,
-      stages: [
-        { key: 'firstSent', label: 'First sent', source: 'Klaviyo delivered first message (milestone)', format: 'int', kind: 'sum',
-          id: 10, us: 4, trend: { id: T(10, 0.04, 401), us: T(4, 0.04, 402) } },
-        { key: 'viewed', label: 'Viewed performance', source: 'Opened dashboard to check results', format: 'int', kind: 'sum',
-          id: 68, us: 28, trend: { id: T(68, 0.03, 403), us: T(28, 0.035, 404) } },
-        { key: 'reviewed', label: 'Reviewed or edited', source: 'Touched a campaign draft', format: 'int', kind: 'sum',
-          id: 54, us: 22, trend: { id: T(54, 0.025, 405), us: T(22, 0.03, 406) } },
-        { key: 'launched', label: 'Launched to Klaviyo', source: 'Approved and pushed live', format: 'int', kind: 'sum',
-          id: 46, us: 18, trend: { id: T(46, 0.03, 407), us: T(18, 0.025, 408) } },
-        { key: 'sent', label: 'Messages sent', source: 'Klaviyo continues delivering', format: 'int', kind: 'sum',
-          id: 41, us: 17, trend: { id: T(41, 0.03, 409), us: T(17, 0.03, 410) } },
-        { key: 'orders', label: 'Orders generated', source: 'Campaigns drove sales', format: 'int', kind: 'sum',
-          id: 30, us: 12, trend: { id: T(30, 0.04, 411), us: T(12, 0.04, 412) } },
-      ],
-    },
-    campaign: {
-      key: 'campaign',
-      title: 'Campaign Performance',
-      subtitle: 'How are end-user funnels performing?',
-      scope: 'This month, all campaigns, end-user counts',
-      override: '',
-      stages: [
-        { key: 'targeted', label: 'Customers targeted', source: 'Segment size across all sends', format: 'kilo', kind: 'sum',
-          id: 1_120_000, us: 480_000, trend: { id: T(1_120_000, 0.03, 501), us: T(480_000, 0.04, 502) } },
-        { key: 'sent', label: 'Customers sent', source: 'Klaviyo delivered to inbox', format: 'kilo', kind: 'sum',
-          id: 1_000_000, us: 420_000, trend: { id: T(1_000_000, 0.03, 503), us: T(420_000, 0.035, 504) } },
-        { key: 'opened', label: 'Customers opened', source: 'Opened the email', format: 'kilo', kind: 'sum',
-          id: 270_000, us: 110_000, trend: { id: T(270_000, 0.025, 505), us: T(110_000, 0.03, 506) } },
-        { key: 'clicked', label: 'Customers clicked', source: 'Clicked through', format: 'kilo', kind: 'sum',
-          id: 31_000, us: 11_000, trend: { id: T(31_000, 0.03, 507), us: T(11_000, 0.035, 508) } },
-        { key: 'ordered', label: 'Customers ordered', source: 'Placed an order', format: 'kilo', kind: 'sum',
-          id: 3_400, us: 1_400, trend: { id: T(3_400, 0.04, 509), us: T(1_400, 0.04, 510) } },
-      ],
-    },
-  };
-}
 
 /* -------------------------------------------------------------------------- */
 /* Editable primitives                                                        */
@@ -395,6 +301,7 @@ function EditableNumber({ value, format, onChange, align = 'right', size = 14, w
         color,
         minWidth: 32,
         display: 'inline-block',
+        whiteSpace: 'nowrap',
       }}
       onBlur={commit}
       onKeyDown={(e) => {
@@ -579,13 +486,12 @@ function SectionLabel({ label, region, right }) {
 /* North Star                                                                 */
 /* -------------------------------------------------------------------------- */
 
-function NorthStarTile({ metric, region, onCommit }) {
+function NorthStarTile({ metric, target, region, period, onCommit, onCommitTarget }) {
   const val = metricVal(metric, region);
   const trend = metricTrend(metric, region);
   const delta = trendDelta(trend);
   const sparkColor = deltaColor(delta.dir);
-
-  const handle = (newVal) => onCommit(metric.key, region, newVal);
+  const pace = paceInfo(metric, target, region, period);
 
   return (
     <div className="yl-panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -596,9 +502,9 @@ function NorthStarTile({ metric, region, onCommit }) {
         <EditableNumber
           value={val}
           format={metric.format}
-          onChange={handle}
+          onChange={(v) => onCommit(metric.key, region, v)}
           align="left"
-          size={28}
+          size="clamp(20px, 6.5vw, 28px)"
           weight={600}
         />
         <span className="yl-num" style={{ fontSize: 12, color: sparkColor, fontWeight: 500 }}>
@@ -606,18 +512,47 @@ function NorthStarTile({ metric, region, onCommit }) {
         </span>
       </div>
       <Sparkline points={trend} w={120} h={26} color={sparkColor} area />
+      {pace && (
+        <div className="yl-num" style={{
+          display: 'flex', gap: 6, alignItems: 'baseline', flexWrap: 'wrap',
+          fontSize: 11, color: C.faint,
+        }}>
+          <span>Target</span>
+          <EditableNumber
+            value={pace.targetVal}
+            format={metric.format}
+            onChange={(v) => onCommitTarget(metric.key, region, v)}
+            align="left"
+            size={11}
+            weight={500}
+            color={C.dim}
+          />
+          <span>· pace {pace.pace}%</span>
+          <span style={{ color: PACE_COLOR[pace.status] || C.faint, fontWeight: 500 }}>
+            {pace.status}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
 
-function NorthStarSection({ data, region, onCommit }) {
-  const tiles = [data.northStar.arr, data.northStar.newMrr, data.northStar.activeCustomers, data.northStar.nrr];
+function NorthStarSection({ slice, targets, region, period, onCommit, onCommitTarget }) {
+  const tiles = [slice.northStar.arr, slice.northStar.newMrr, slice.northStar.activeCustomers, slice.northStar.nrr];
   return (
     <section style={{ marginBottom: 32 }}>
       <SectionLabel label="North Star" region={region} />
       <div className="yl-northstar-grid">
         {tiles.map((m) => (
-          <NorthStarTile key={m.key} metric={m} region={region} onCommit={onCommit} />
+          <NorthStarTile
+            key={m.key}
+            metric={m}
+            target={targets[m.key]}
+            region={region}
+            period={period}
+            onCommit={onCommit}
+            onCommitTarget={onCommitTarget}
+          />
         ))}
       </div>
     </section>
@@ -628,8 +563,8 @@ function NorthStarSection({ data, region, onCommit }) {
 /* Top funnel card                                                            */
 /* -------------------------------------------------------------------------- */
 
-function FunnelCard({ funnel, region, onCommitStage, onCommitOverride }) {
-  const suggestion = useMemo(() => autoSuggest(funnel, region), [funnel, region]);
+function FunnelCard({ funnel, override, config, region, onCommitStage, onCommitOverride }) {
+  const suggestion = useMemo(() => autoSuggest(funnel, region, config), [funnel, region, config]);
   const stages = funnel.stages.map((s, i) => {
     const val = metricVal(s, region);
     const trend = metricTrend(s, region);
@@ -661,7 +596,7 @@ function FunnelCard({ funnel, region, onCommitStage, onCommitOverride }) {
               {String(s.i + 1).padStart(2, '0')}
             </span>
             <span style={{ fontSize: 13, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {s.label}
+              {stageLabel(s, config)}
             </span>
             <EditableNumber
               value={s.val}
@@ -673,14 +608,14 @@ function FunnelCard({ funnel, region, onCommitStage, onCommitOverride }) {
             />
             <Sparkline points={s.trend} w={44} h={16} color={deltaColor(s.delta.dir)} />
             <span className="yl-num" style={{
-              fontSize: 12, textAlign: 'right', color: convColor(s.conv), fontWeight: 500,
+              fontSize: 12, textAlign: 'right', color: convColor(s.conv, config), fontWeight: 500,
             }}>
               {s.conv === null ? '' : Math.round(s.conv) + '%'}
             </span>
           </div>
         ))}
       </div>
-      <ActionBanner funnel={funnel} suggestion={suggestion} onCommitOverride={onCommitOverride} />
+      <ActionBanner funnelKey={funnel.key} override={override} suggestion={suggestion} onCommitOverride={onCommitOverride} />
     </div>
   );
 }
@@ -689,7 +624,7 @@ function FunnelCard({ funnel, region, onCommitStage, onCommitOverride }) {
 /* Action banner                                                              */
 /* -------------------------------------------------------------------------- */
 
-function ActionBanner({ funnel, suggestion, onCommitOverride }) {
+function ActionBanner({ funnelKey, override, suggestion, onCommitOverride }) {
   const color = STATUS_COLOR[suggestion.status];
   return (
     <div style={{
@@ -708,8 +643,8 @@ function ActionBanner({ funnel, suggestion, onCommitOverride }) {
           Action
         </span>
         <EditableText
-          value={funnel.override}
-          onChange={(t) => onCommitOverride(funnel.key, t)}
+          value={override}
+          onChange={(t) => onCommitOverride(funnelKey, t)}
           placeholder="Add your note"
         />
       </div>
@@ -721,8 +656,8 @@ function ActionBanner({ funnel, suggestion, onCommitOverride }) {
 /* Detail funnel (CS + Campaign)                                              */
 /* -------------------------------------------------------------------------- */
 
-function DetailFunnel({ funnel, region, onCommitStage, onCommitOverride }) {
-  const suggestion = useMemo(() => autoSuggest(funnel, region), [funnel, region]);
+function DetailFunnel({ funnel, override, config, region, onCommitStage, onCommitOverride }) {
+  const suggestion = useMemo(() => autoSuggest(funnel, region, config), [funnel, region, config]);
   const stages = funnel.stages.map((s, i) => {
     const val = metricVal(s, region);
     const trend = metricTrend(s, region);
@@ -750,7 +685,7 @@ function DetailFunnel({ funnel, region, onCommitStage, onCommitOverride }) {
         <div style={{ fontSize: 16, fontWeight: 600 }}>{funnel.title}</div>
         <div style={{ fontSize: 11, color: C.faint }}>{funnel.subtitle}</div>
         <div style={{ marginLeft: 'auto', fontSize: 12, color: C.dim }}>
-          End to end: <span className="yl-num" style={{ color: convColor(e2e), fontWeight: 600 }}>{Math.round(e2e)}%</span>
+          End to end: <span className="yl-num" style={{ color: convColor(e2e, config), fontWeight: 600 }}>{Math.round(e2e)}%</span>
         </div>
       </div>
       <div style={{ fontSize: 11, color: C.faint, marginBottom: 14 }}>{funnel.scope}</div>
@@ -760,6 +695,7 @@ function DetailFunnel({ funnel, region, onCommitStage, onCommitOverride }) {
             key={s.key}
             stage={s}
             funnelKey={funnel.key}
+            config={config}
             region={region}
             maxVal={maxVal}
             onCommitStage={onCommitStage}
@@ -767,20 +703,20 @@ function DetailFunnel({ funnel, region, onCommitStage, onCommitOverride }) {
         ))}
       </div>
       <div style={{ marginTop: 14 }}>
-        <ActionBanner funnel={funnel} suggestion={suggestion} onCommitOverride={onCommitOverride} />
+        <ActionBanner funnelKey={funnel.key} override={override} suggestion={suggestion} onCommitOverride={onCommitOverride} />
       </div>
     </section>
   );
 }
 
-function DetailStageRow({ stage, funnelKey, region, maxVal, onCommitStage }) {
+function DetailStageRow({ stage, funnelKey, config, region, maxVal, onCommitStage }) {
   const barPct = Math.max(2, (stage.val / maxVal) * 100);
   return (
     <div className="yl-detail-row">
       <span className="yl-detail-num">{String(stage.i + 1).padStart(2, '0')}</span>
       <div className="yl-detail-text">
-        <div style={{ fontSize: 14, color: C.text, fontWeight: 500 }}>{stage.label}</div>
-        <div style={{ fontSize: 11, color: C.faint, marginTop: 2 }}>{stage.source}</div>
+        <div style={{ fontSize: 14, color: C.text, fontWeight: 500 }}>{stageLabel(stage, config)}</div>
+        <div style={{ fontSize: 11, color: C.faint, marginTop: 2 }}>{stageSource(stage, config)}</div>
       </div>
       <div className="yl-detail-value">
         <EditableNumber
@@ -793,7 +729,7 @@ function DetailStageRow({ stage, funnelKey, region, maxVal, onCommitStage }) {
         />
       </div>
       <div className="yl-detail-meta">
-        <span className="yl-detail-conv yl-num" style={{ color: convColor(stage.conv) }}>
+        <span className="yl-detail-conv yl-num" style={{ color: convColor(stage.conv, config) }}>
           {stage.conv === null ? '' : Math.round(stage.conv) + '%'}
         </span>
         <div className="yl-detail-bar">
@@ -811,17 +747,41 @@ function DetailStageRow({ stage, funnelKey, region, maxVal, onCommitStage }) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Footer                                                                     */
+/* Config row + footer                                                        */
 /* -------------------------------------------------------------------------- */
+
+function ConfigRow({ config, onCommitConfig }) {
+  const item = { display: 'flex', gap: 6, alignItems: 'baseline' };
+  return (
+    <div style={{
+      marginTop: 28, paddingTop: 16, borderTop: `1px solid ${C.line}`,
+      display: 'flex', gap: 24, alignItems: 'baseline', flexWrap: 'wrap',
+    }}>
+      <span className="yl-section-label">Config</span>
+      <span style={{ ...item, fontSize: 12, color: C.dim }}>
+        ROI multiple
+        <EditableNumber value={config.roiMultiple} format="int" onChange={(v) => onCommitConfig('roiMultiple', v)} size={12} weight={600} color={C.text} align="left" />
+      </span>
+      <span style={{ ...item, fontSize: 12, color: C.dim }}>
+        Conv good
+        <EditableNumber value={config.convGood} format="pct" onChange={(v) => onCommitConfig('convGood', v)} size={12} weight={600} color={C.text} align="left" />
+      </span>
+      <span style={{ ...item, fontSize: 12, color: C.dim }}>
+        Conv bad
+        <EditableNumber value={config.convBad} format="pct" onChange={(v) => onCommitConfig('convBad', v)} size={12} weight={600} color={C.text} align="left" />
+      </span>
+    </div>
+  );
+}
 
 function Footer({ onExport, onReset }) {
   return (
     <footer style={{
-      marginTop: 28, paddingTop: 20, borderTop: `1px solid ${C.line}`,
+      marginTop: 16, paddingTop: 20, borderTop: `1px solid ${C.line}`,
       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
       flexWrap: 'wrap', gap: 12, paddingBottom: 32,
     }}>
-      <div style={{ fontSize: 12, color: C.faint }}>Tap any number or note to edit.</div>
+      <div style={{ fontSize: 12, color: C.faint }}>Tap any number or note to edit. Edits save on this device.</div>
       <div style={{ display: 'flex', gap: 4 }}>
         <button type="button" className="yl-btn-link" onClick={onExport}>Export JSON</button>
         <button type="button" className="yl-btn-link" onClick={onReset}>Reset</button>
@@ -837,41 +797,46 @@ function Footer({ onExport, onReset }) {
 export default function YoboLabsDashboard() {
   const [region, setRegion] = useState('combined');
   const [period, setPeriod] = useState('mtd');
-  const [data, setData] = useState(() => buildSeed());
+  const [state, setState] = useState(() => loadState() ?? buildSeed());
+  const dirty = useRef(false);
 
-  /* Edit handlers ----------------------------------------------------------- */
-  const commitMetric = (sectionKey, key, region, newVal) => {
-    setData((prev) => {
+  /* Persist after the first real edit; a fresh seed stays unsaved so future
+   * seed updates reach devices that never edited anything. */
+  useEffect(() => {
+    if (dirty.current) saveState(state);
+  }, [state]);
+
+  const mutate = (fn) => {
+    setState((prev) => {
       const next = structuredClone(prev);
-      const m = next[sectionKey][key];
-      applyEdit(m, region, newVal);
+      fn(next);
       return next;
     });
+    dirty.current = true;
   };
 
-  const commitNorthStar = (key, region, newVal) => commitMetric('northStar', key, region, newVal);
+  const commitNorthStar = (key, region, newVal) =>
+    mutate((n) => applyEdit(n.periods[period].northStar[key], region, newVal));
 
-  const commitStage = (funnelKey, stageKey, region, newVal) => {
-    setData((prev) => {
-      const next = structuredClone(prev);
-      const funnel = next[funnelKey];
-      const stage = funnel.stages.find((s) => s.key === stageKey);
-      if (!stage) return prev;
-      applyEdit(stage, region, newVal);
-      return next;
+  const commitStage = (funnelKey, stageKey, region, newVal) =>
+    mutate((n) => {
+      const stage = n.periods[period][funnelKey].stages.find((s) => s.key === stageKey);
+      if (stage) applyEdit(stage, region, newVal);
     });
-  };
 
-  const commitOverride = (funnelKey, text) => {
-    setData((prev) => {
-      const next = structuredClone(prev);
-      next[funnelKey].override = text;
-      return next;
+  const commitOverride = (funnelKey, text) =>
+    mutate((n) => { n.overrides[funnelKey] = text; });
+
+  const commitTarget = (metricKey, region, newVal) =>
+    mutate((n) => applyEdit(n.config.targets[metricKey], region, newVal));
+
+  const commitConfig = (field, newVal) =>
+    mutate((n) => {
+      if (newVal > 0) n.config[field] = newVal;
     });
-  };
 
   const handleExport = () => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -882,11 +847,15 @@ export default function YoboLabsDashboard() {
 
   const handleReset = () => {
     if (window.confirm('Reset all values and notes to the seed data?')) {
-      setData(buildSeed());
+      clearState();
+      dirty.current = false;
+      setState(buildSeed());
     }
   };
 
-  /* Layout ------------------------------------------------------------------ */
+  const slice = state.periods[period];
+  const config = state.config;
+
   return (
     <div style={{
       minHeight: '100vh', background: C.bg, color: C.text,
@@ -896,23 +865,53 @@ export default function YoboLabsDashboard() {
       <div style={{ maxWidth: 1280, margin: '0 auto' }}>
         <Header region={region} setRegion={setRegion} period={period} setPeriod={setPeriod} />
 
-        <NorthStarSection data={data} region={region} onCommit={commitNorthStar} />
+        <NorthStarSection
+          slice={slice}
+          targets={config.targets}
+          region={region}
+          period={period}
+          onCommit={commitNorthStar}
+          onCommitTarget={commitTarget}
+        />
 
         <section style={{ marginBottom: 32 }}>
           <SectionLabel label="Funnels" region={region} />
           <div className="yl-funnel-grid">
-            <FunnelCard funnel={data.acquisition} region={region} onCommitStage={commitStage} onCommitOverride={commitOverride} />
-            <FunnelCard funnel={data.activation} region={region} onCommitStage={commitStage} onCommitOverride={commitOverride} />
-            <FunnelCard funnel={data.revenue} region={region} onCommitStage={commitStage} onCommitOverride={commitOverride} />
+            {['acquisition', 'activation', 'revenue'].map((fk) => (
+              <FunnelCard
+                key={fk}
+                funnel={slice[fk]}
+                override={state.overrides[fk]}
+                config={config}
+                region={region}
+                onCommitStage={commitStage}
+                onCommitOverride={commitOverride}
+              />
+            ))}
           </div>
         </section>
 
         <SectionLabel label="Customer Success" region={region} />
-        <DetailFunnel funnel={data.cs} region={region} onCommitStage={commitStage} onCommitOverride={commitOverride} />
+        <DetailFunnel
+          funnel={slice.cs}
+          override={state.overrides.cs}
+          config={config}
+          region={region}
+          onCommitStage={commitStage}
+          onCommitOverride={commitOverride}
+        />
 
         <SectionLabel label="Campaign Performance" region={region} />
-        <DetailFunnel funnel={data.campaign} region={region} onCommitStage={commitStage} onCommitOverride={commitOverride} />
+        <DetailFunnel
+          funnel={slice.campaign}
+          override={state.overrides.campaign}
+          config={config}
+          region={region}
+          onCommitStage={commitStage}
+          onCommitOverride={commitOverride}
+        />
 
+        <ConfigRow config={config} onCommitConfig={commitConfig} />
         <Footer onExport={handleExport} onReset={handleReset} />
       </div>
     </div>
@@ -920,25 +919,7 @@ export default function YoboLabsDashboard() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Edit application (shared)                                                  */
-/* -------------------------------------------------------------------------- */
-
-function applyEdit(m, region, newVal) {
-  if (m.kind === 'ratio') {
-    m[region] = newVal;
-    return;
-  }
-  if (region === 'combined') {
-    const split = splitToRegions(m, newVal);
-    m.id = split.id;
-    m.us = split.us;
-  } else {
-    m[region] = newVal;
-  }
-}
-
-/* -------------------------------------------------------------------------- */
-/* Detail row CSS (injected once)                                             */
+/* Layout CSS (injected once)                                                 */
 /* -------------------------------------------------------------------------- */
 
 const detailFunnelCss = `
