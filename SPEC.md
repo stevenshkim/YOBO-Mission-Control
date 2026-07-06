@@ -1,422 +1,198 @@
-# YoboLabs Mission KPIs — Build Spec
+# YoboLabs Mission KPIs — Spec (as built)
 
-This document is the source of truth for the YoboLabs executive KPI dashboard. Hand it to Claude Code at the start of a build session, or commit it to the repo as `SPEC.md`.
+Version 2, 2026-07-03. This replaces the original prototype handoff spec and describes the dashboard as it exists in this repo. The original spec lives in git history at commit `b58be0c`.
 
-Two prototypes exist:
-1. `yobolabs-dashboard.html` — interactive HTML prototype (vanilla JS, single file, in-memory data)
-2. `yobolabs-dashboard-data.xlsx` — data model and formula layer (8 sheets)
-
-The goal is a production build that pulls live data from internal systems into the dashboard structure proven in the prototype.
+Live build: https://stevenshkim.github.io/YOBO-Mission-Control/
+Repo: `stevenshkim/YOBO-Mission-Control`, branch `claude/build-executive-dashboard-1t0AT`
 
 ---
 
 ## 1. Purpose
 
-A single-page executive dashboard showing whether YoboLabs is winning across acquisition, activation, revenue, and customer outcome. Optimized for:
+A single-page executive dashboard showing whether YoboLabs is winning across acquisition, activation, revenue, and customer outcome. For the founder, leadership, and investors. Not a customer-facing surface.
 
-- One mobile screen for the high-level monitor (3 funnels + north star)
-- Scroll-down for the diagnostic detail (CS + Campaign Performance)
+Optimized for:
+- One mobile screen for the high-level monitor (north star + 3 funnels)
+- Scroll-down for diagnostic detail (Customer Success + Campaign Performance)
 - Click-to-edit every number for what-if and manual overrides
-- ID / US / Combined region toggle on every section
+- Region and period toggles on every section
+- Installable on a phone home screen (PWA)
 
-This dashboard is for the founder, leadership, and investors. It is NOT a customer-facing surface and follows internal voice rules (no marketing copy).
+## 2. Current status
 
----
+| Layer | Status |
+|---|---|
+| UI, all sections and interactions | Built |
+| Period model (MTD, 30D, 90D, QTD) | Built, real per-period data slices |
+| Persistence (edits, notes, config) | Built, localStorage |
+| Config knobs (ROI multiple, conv thresholds, targets) | Built, editable in place |
+| Pace vs target | Built, north star tiles |
+| PWA install | Built |
+| Live data from source systems | Not built. All numbers are seeded mock data. See section 10. |
 
-## 2. Page structure (top to bottom)
+## 3. Stack and file map
+
+Vite + React 18 + Tailwind (utility classes only, design is inline styles + CSS vars). No state library, no router. Deploys to GitHub Pages via Actions on push to `main` or the branch above.
 
 ```
-HEADER
-  Brand + live timestamp
-  Region toggle: Combined | ID | US
-  Period toggle: MTD | 30D | 90D | QTD
-
-SECTION 1 — NORTH STAR (calm, 4 tiles)
-  ARR | New MRR | Active customers | NRR
-  Each tile: label, big number, WoW delta %, sparkline (last 8 buckets)
-
-SECTION 2 — FUNNELS (3 compact cards, side-by-side on desktop)
-  Acquisition  | Activation  | Revenue
-  Each card:
-    Status dot (green / amber / red)
-    Title
-    Compact stage rows: # | label | value | tiny sparkline (44x16) | conv %
-    Action banner:
-      Auto-suggestion (italic, generated from data)
-      Editable override field (user's own note)
-
-SECTION 3 — CUSTOMER SUCCESS DETAIL (full-detail funnel)
-  Title + region label + end-to-end conversion
-  6 stages, each with:
-    # | label | source caption | value | conv % | stage bar | delta % | sparkline (60x20)
-  Action banner (same pattern as top funnels)
-
-SECTION 4 — CAMPAIGN PERFORMANCE (full-detail funnel)
-  Same layout as CS Detail. 5 stages.
-
-FOOTER
-  "Tap any number or banner to edit"
-  Export JSON / Reset buttons
+index.html                     entry, Inter font, manifest + icon links
+src/main.jsx                   mount + service worker registration
+src/YoboLabsDashboard.jsx      the entire UI, one file on purpose
+src/data.js                    seed generation, period model, localStorage
+public/manifest.webmanifest    PWA manifest
+public/sw.js                   no-cache service worker (install eligibility only)
+public/icons/                  192 + 512 icons
+.github/workflows/deploy.yml   Pages deploy, BASE_PATH /YOBO-Mission-Control/
 ```
 
----
+Gotcha: the Pages URL is case-sensitive. Capital letters as in the repo name.
 
-## 3. Funnel definitions
+## 4. Page structure (top to bottom)
 
-### 3.1 Acquisition — "Are we filling the top?"
+```
+HEADER      brand, live timestamp, Region toggle (Combined | ID | US),
+            Period toggle (MTD | 30D | 90D | QTD)
+SECTION 1   North star: ARR, New MRR, Active customers, NRR.
+            Each tile: label, big editable number, delta vs prior bucket,
+            sparkline, pace line (editable target, pace %, status word)
+SECTION 2   Funnels: Acquisition, Activation, Revenue side by side.
+            Each card: status dot, stage rows (number, label, editable value,
+            44x16 sparkline, conv %), action banner
+SECTION 3   Customer Success detail funnel, 6 stages, full rows with source
+            caption, stage bar, delta, 60x20 sparkline, end-to-end conv
+SECTION 4   Campaign Performance detail funnel, 5 stages, same layout,
+            end-user counts formatted in K/M
+CONFIG ROW  ROI multiple, Conv good %, Conv bad %, all editable
+FOOTER      edit hint, Export JSON, Reset
+```
 
+## 5. Funnel definitions
+
+### Acquisition. Are we filling the top?
+| # | Stage | Source of truth (when wired) |
+|---|---|---|
+| 01 | Leads | CRM, top-of-funnel inquiries |
+| 02 | MQL | CRM, marketing-qualified, fits ICP |
+| 03 | Signups | Product DB, created account |
+
+### Activation. Are new customers reaching first value?
 | # | Stage | Source |
 |---|---|---|
-| 01 | Leads | CRM (HubSpot) — top-of-funnel inquiries |
-| 02 | MQL | CRM — marketing-qualified, fits ICP |
-| 03 | Signups | Product DB — created YoboLabs account |
+| 01 | Signups | Product DB |
+| 02 | Connected | Shopify + Klaviyo + POS data flowing |
+| 03 | First launch | YoboLabs pushed first flow to Klaviyo |
+| 04 | First sent | Klaviyo sent at least one message |
 
-### 3.2 Activation — "Are new customers reaching first value?"
+First launch means we did our job. First sent means the system works end to end. If launch is high but sent lags, there is an integration or scheduling issue.
 
+### Revenue. Are we paid and proving ROI?
 | # | Stage | Source |
 |---|---|---|
-| 01 | Signups | Product DB — same as acquisition output |
-| 02 | Connected | Product DB — Shopify + Klaviyo + POS data flowing |
-| 03 | First launch | Product DB — YoboLabs pushed first flow to Klaviyo |
-| 04 | First sent | Klaviyo API — Klaviyo sent at least one message |
+| 01 | Card on file | Stripe |
+| 02 | First payment | Stripe |
+| 03 | Nx ROI | Stripe + Shopify attribution. N is the ROI multiple knob, default 3. The stage label updates when the knob changes. |
+| 04 | Upgrades | Stripe tier expansion |
 
-The split between First launch and First sent matters: First launch is "we did our job," First sent is "system end-to-end works." If launch is high but sent lags, there's an integration or scheduling issue.
+### Customer Success. Are paying customers active and getting results?
+Scope: paying customers, last 4 weeks, distinct customer-weeks. Stage 01 is a milestone entry so no conv % is shown between 01 and 02.
+| # | Stage |
+|---|---|
+| 01 | First sent (milestone) |
+| 02 | Viewed performance |
+| 03 | Reviewed or edited |
+| 04 | Launched to Klaviyo |
+| 05 | Messages sent |
+| 06 | Orders generated |
 
-### 3.3 Revenue — "Are we paid and proving ROI?"
+### Campaign Performance. How are end-user funnels performing?
+Scope: this month, all campaigns. "Customers" here are end consumers of YoboLabs clients, so counts run 10K to 1M+ and format as K/M.
+Targeted, Sent, Opened, Clicked, Ordered.
 
-| # | Stage | Source |
-|---|---|---|
-| 01 | Card on file | Stripe — payment method added |
-| 02 | First payment | Stripe — first charge succeeded |
-| 03 | 3x ROI | Stripe + Shopify — customer driving ≥ 3× their monthly cost in attributed sales |
-| 04 | Upgrades | Stripe — tier expansion (subscription upgrade) |
-
-ROI multiple is configurable (default 3, stored in `Config!C15`). The "3x" label in the funnel header reflects the current value.
-
-### 3.4 Customer Success Detail — "Are paying customers active and getting results?"
-
-Scope: paying customers, last 4 weeks, distinct customer-weeks counted.
-
-| # | Stage | Source caption |
-|---|---|---|
-| 01 | First sent | Klaviyo delivered first message (milestone) |
-| 02 | Viewed performance | opened dashboard to check results |
-| 03 | Reviewed / edited | touched a campaign draft |
-| 04 | Launched to Klaviyo | approved and pushed live |
-| 05 | Messages sent | Klaviyo continues delivering |
-| 06 | Orders generated | campaigns drove sales |
-
-Stage 01 is a milestone entry. Stages 02–06 are ongoing weekly behaviors counted across the last 4 weeks. The funnel orders by depth of engagement: light touch (viewing) → operating (reviewing, launching) → outcome (messages, orders).
-
-### 3.5 Campaign Performance — "How are end-user funnels performing?"
-
-Scope: this-month total across all campaigns sent.
-
-| # | Stage | Source caption |
-|---|---|---|
-| 01 | Customers targeted | segment size across all sends |
-| 02 | Customers sent | Klaviyo delivered to inbox |
-| 03 | Customers opened | opened the email |
-| 04 | Customers clicked | clicked through |
-| 05 | Customers ordered | placed an order |
-
-Different from CS Detail in two ways: "customers" here are end-users (consumers receiving emails from YoboLabs' clients), not YoboLabs' customers. Numbers are large (10K–100K range), so use thousands/millions formatting.
-
----
-
-## 4. Action banner logic
-
-Every funnel card has an Action banner with two parts:
-- **Auto-suggestion** (italic, system-generated)
-- **Override** (editable, user's own action note)
-
-### Auto-suggestion algorithm
-
-```
-1. Compute stage-to-stage conversion % for each stage after the first
-2. Find weakest conv % across the funnel
-3. Identify stages with declining WoW delta (dir === 'down')
-4. Identify stages stuck at zero when prior > 0 (stalled)
-
-Status decision:
-  - stalledStages > 0           → RED: "{stage} stalled at zero. Investigate handoff."
-  - weakestConv < 20%           → RED: "{from} → {to} only {x}%. {N} stuck."
-  - weakestConv < 40% OR        → AMBER: "{from} → {to} at {x}%. Worth a look."
-    decliningStages >= 2          OR "{N} stages declining. Review {a}, {b}."
-  - decliningStages === 1       → AMBER: "{stage} trending down. Worth checking."
-  - else                        → GREEN: "{Funnel} healthy. Nothing to do."
-```
-
-Status dot color matches: green / amber / red.
-
-Conversion thresholds live in Config: "good" = 50%, "bad" = 20% (defaults, editable).
-
----
-
-## 5. Visual / UX rules
+## 6. Computations
 
-### Typography
-- **Single font: Inter** (400, 500, 600, 700)
-- No mono font, no font switching
-- `font-variant-numeric: tabular-nums` on all numeric cells
-- Letter-spacing tightened by `-0.01em` on numbers
+All in `src/YoboLabsDashboard.jsx`.
 
-### Colors (CSS variables)
+**Conversion per stage** `conv_i = value_i / value_(i-1) * 100`. Color: green at or above the Conv good knob (default 50), red below the Conv bad knob (default 20), dim otherwise.
 
-```css
---bg: #0a0a0a;          /* page background */
---panel: #131313;        /* card background */
---panel-2: #1a1a1a;      /* nested card */
---line: #222222;         /* borders */
---line-2: #2e2e2e;       /* hover/focus borders */
---text: #f5f5f5;         /* primary text */
---text-dim: #8a8a8a;     /* secondary text */
---text-faint: #555555;   /* tertiary, labels */
---green: #6FED45;        /* YoboLabs brand green, positive */
---red: #ff4d4d;          /* negative */
---amber: #ffb547;        /* watch state */
-```
+**Delta** compares the last two trend buckets. `pct = (curr - prev) / prev * 100`, direction up above +0.5, down below -0.5, else flat. Zero to zero is flat, zero to positive shows "new".
 
-Color is **semantic only**: green/red/amber carry status meaning. No decorative color anywhere.
+**Pace vs target** (north star tiles). Two metric kinds:
+- Flow metrics (New MRR): accrue over the window. `expected = target * elapsed_fraction`, `pace = actual / expected * 100`. Elapsed fraction is day-of-month over days-in-month for MTD, day-of-quarter for QTD, and 1 for rolling 30D/90D windows.
+- Stock and ratio metrics (ARR, Active customers, NRR): level vs target directly, `pace = actual / target * 100`.
 
-### Mobile-first rules
-- Single column under 720px
-- All grids collapse: north star 2×2, funnels stacked, detail funnel always vertical
-- Min touch target 36px on toggles/buttons
-- Toggles scroll horizontally if they overflow
-- Sparklines stay visible but smaller on mobile
+Status: 110+ ahead, 95+ on track, 80+ watch, below 80 behind. Color only on watch (amber) and behind (red). Green never highlights, calm by default.
 
-### Spacing & sizing
-- Section gap: 28px mobile / 32px desktop
-- Card padding: 16px mobile / 20px desktop
-- Stage gap inside funnel: 16-18px
-- Sparklines in top funnels: 44×16
-- Sparklines in detail funnels: 60×20
-- Sparklines on north star: 60×20
+**Auto-suggestion** per funnel, in priority order:
+1. Any stage at zero while the prior stage is positive: red, "X stalled at zero. Investigate handoff."
+2. Weakest conv below Conv bad: red, "A to B only N%. M stuck."
+3. Two or more stages declining week over week: amber, "N stages declining. Review A, B."
+4. Weakest conv below 40: amber, "A to B at N%. Worth a look."
+5. One declining stage: amber, "X trending down. Worth checking."
+6. Otherwise green, "Funnel healthy. Nothing to do."
 
-### Editing UX
-- Every number is `contenteditable="true"`
-- Click number → background turns to `--line` shade
-- Edit, Enter or Tab → parse + re-render
-- Parser accepts: `1.6M`, `18K`, `$500`, `112%`, raw numbers, with or without commas
-- When editing on "Combined" view, edits split proportionally between ID and US based on existing ratio
+## 7. Region and period model
 
-### Copy & voice rules (CRITICAL — follow these)
-- Never use em dashes or en dashes
-- No exclamation marks
-- No emojis
-- Plain words: "use" not "leverage", "run" not "operationalize"
-- Numbers over adjectives
-- Operator voice: "Acquisition healthy. Nothing to do." not "Great job, your acquisition is performing excellently!"
-- Section subtitles are descriptive, not promotional
-- Brand: always "YoboLabs" (capital Y, lowercase obo, capital L, one word)
+**Region.** Every sum metric stores `id` and `us`; Combined is always computed as the sum, never stored. Ratio metrics (NRR) store all three explicitly. Editing a number while on Combined splits the new value between ID and US proportionally to the existing ratio (50/50 if both are zero).
 
----
+**Period.** State holds four full data slices, one per period (`src/data.js`). Switching period switches the slice, so values and sparklines both change. Sparkline buckets: MTD 8, 30D 8, 90D 12, QTD 3. Edits apply to the currently selected period slice only.
 
-## 6. Data model
+## 8. Editing and persistence
 
-The spreadsheet `yobolabs-dashboard-data.xlsx` defines the data layer. 8 sheets:
+- Every number is contenteditable. Enter or blur commits, Escape reverts.
+- Parser accepts `1.6M`, `18K`, `$500`, `112%`, raw numbers, commas.
+- Action banners: italic auto-suggestion plus an editable override note per funnel. Notes are shared across periods (a note is about the funnel, not the window).
+- Persistence: the full state object is written to localStorage key `yobolabs-kpis-v1` after the first edit. Until then the seed stays live so fresh devices always get current seed data. Reset clears storage and restores the seed. Export JSON downloads the full state.
+- The `v` field in stored state guards migrations. Bump it when the shape changes and stale stored state will be discarded.
 
-### 6.1 Config (knobs and targets)
+## 9. Config knobs
 
-| Cell | Field | Notes |
-|---|---|---|
-| C6 / D6 / E6 | ARR target ID / US / Combined | Monthly target |
-| C7 / D7 / E7 | New MRR target | |
-| C8 / D8 / E8 | Active customers target | |
-| C9 / D9 / E9 | NRR target | |
-| C10 / D10 / E10 | Signups target | |
-| C11 / D11 / E11 | First payments target | |
-| C15 | ROI multiple | Default 3 |
-| C16 | Revenue threshold $/wk (weekly view, legacy) | |
-| C17 | Min conv % good | Default 50 |
-| C18 | Min conv % bad | Default 20 |
-| C23 | Current month start date | |
-| C24 | Days elapsed | |
-| C25 | Days in month | |
-| C26 | Quarter start date | |
+Editable in the config row above the footer, persisted with everything else:
+- ROI multiple (default 3). Drives the Revenue funnel stage label and source caption.
+- Conv good % (default 50) and Conv bad % (default 20). Drive all conversion colors and the suggestion thresholds.
+- Per-metric targets are edited inline in each north star tile (the Target number in the pace line). Targets split by region the same way values do.
 
-### 6.2 Acquisition_Daily
+## 10. Mock data, until the data layer lands
 
-Columns: `Date | Region | Leads | MQL | Signups | Notes`
+`buildSeed()` in `src/data.js` generates everything deterministically (seeded PRNG, no random flicker between reloads).
+- Flow metrics accrue with the real calendar: on day 3 of a month, MTD numbers are about 10% of the monthly base. This keeps pace math honest.
+- Stock metrics hold their level across periods.
+- Base calibration: about $480K ARR, 38 active customers, ID roughly 2x US.
 
-One row per (date, region). Source: HubSpot or whatever CRM is canonical.
+To change seed numbers, edit the templates at the top of `src/data.js` (`NORTH_STAR`, `FUNNELS`) and bump `STATE_VERSION` if the shape changed.
 
-### 6.3 Activation_Cohorts
+## 11. Visual and voice rules
 
-Columns: `Customer ID | Customer Name | Region | Signup Date | Connected Date | First Launch Date | First Sent Date | Notes`
+- Single font: Inter 400/500/600/700. Tabular numerals everywhere.
+- Dark palette via CSS vars in `src/index.css`: bg #0a0a0a, panels #131313/#1a1a1a, text #f5f5f5, green #6FED45 (brand, positive), red #ff4d4d, amber #ffb547.
+- Color is semantic only. No decorative color.
+- Copy: no em dashes, no exclamation marks, no emojis, numbers over adjectives, operator voice. "Acquisition healthy. Nothing to do."
+- Brand is always YoboLabs, one word.
+- Region and period toggles are segmented controls, never dropdowns.
+- Mobile: single column under 720px, north star 2x2, 36px touch targets, toggles scroll horizontally.
 
-One row per customer. Date cells blank if not yet reached. Source: product DB.
+## 12. Deploy
 
-### 6.4 Revenue_Customers
+Push to `main` or `claude/build-executive-dashboard-1t0AT` triggers `.github/workflows/deploy.yml`: npm ci, vite build with `BASE_PATH=/YOBO-Mission-Control/`, deploy to Pages. Takes about a minute. The service worker does not cache, so a hard refresh always gets the newest deploy.
 
-Columns: `Customer ID | Region | Card on File Date | First Payment Date | Monthly Cost ($) | Attributed Sales 30d ($) | ROI Multiple | Last Upgrade Date | Active This Month?`
+Local: `npm ci`, `npm run dev` for dev server, `npm run build && npm run preview` for a production check.
 
-ROI Multiple is computed: `=F{row}/E{row}` (sales / monthly cost). Source: Stripe + product DB + Shopify attribution.
+## 13. Roadmap
 
-### 6.5 CS_Weekly
+**Phase 1, data layer (next).** Google Sheet holding the raw data model (Acquisition_Daily, Activation_Cohorts, Revenue_Customers, CS_Weekly, Campaign_Performance, Config, Dashboard_Summary). An Apps Script web app returns Dashboard_Summary as JSON matching the state shape in section 7. The dashboard fetches on load with the seed as fallback, and manual edits become patches layered over fetched data instead of whole-state persistence.
 
-Columns: `Customer ID | Region | Week Ending | First Sent (milestone) | Viewed Performance | Reviewed / Edited | Launched to Klaviyo | Messages Sent | Orders Generated | Attributed Sales ($)`
+**Phase 2, source syncs.** Acquisition_Daily from the CRM, Activation_Cohorts nightly from product DB, Revenue_Customers from Stripe webhooks plus Shopify attribution, CS_Weekly from product analytics, Campaign_Performance nightly from Klaviyo.
 
-One row per (customer, week). Action columns are 0/1 flags. Source: product analytics + Klaviyo + Shopify.
+**Phase 3, hosting.** `kpis.yobolabs.ai` behind SSO. Needs a DNS and hosting decision.
 
-### 6.6 Campaign_Performance
+**Phase 4, action layer.** Every amber or red suggestion feeds a task queue, override notes sync to Notion or Linear, weekly digest email generated from dashboard state.
 
-Columns: `Campaign ID | Send Date | Region | Campaign Name | Customers Targeted | Customers Sent | Customers Opened | Customers Clicked | Customers Ordered | Sales Generated ($)`
+## 14. QC checklist
 
-One row per campaign send. Source: Klaviyo API.
-
-### 6.7 Dashboard_Summary
-
-Read-only sheet. All formulas. Sections match the dashboard structure. This is what the dashboard reads from. Three columns per metric: ID, US, Combined (= ID + US).
-
-Sections in Dashboard_Summary:
-- North Star
-- Acquisition Funnel (this month)
-- Activation Funnel (this month cohort)
-- Revenue Funnel (this month)
-- Customer Success Detail (last 4 weeks)
-- Campaign Performance (this month, all campaigns)
-- Targets (pass-through from Config)
-
-Formula patterns used:
-- `SUMIFS(...)` for daily sums by region and date range
-- `COUNTIFS(...)` for cohort counts by region and milestone date
-- `SUMPRODUCT(...)` for CS_Weekly aggregation across customer-weeks
-- Cross-sheet references for targets (= Config!Cx)
-
-107 formulas total. Zero errors on load.
-
----
-
-## 7. Compute logic (for the build)
-
-### 7.1 Conversion % per stage
-```
-For stage i > 0:
-  conv_i = (value_i / value_{i-1}) * 100
-
-For stage 0:
-  conv = 100
-```
-
-Color thresholds:
-- conv >= 50% → green
-- conv < 20% → red
-- else → neutral (dim)
-
-### 7.2 Delta (WoW for weekly, MoM for monthly)
-```
-prev = trend[length - 2]
-curr = trend[length - 1]
-
-if prev === 0 && curr === 0:  flat
-if prev === 0 && curr > 0:    up (pct null)
-else:                          pct = (curr - prev) / prev * 100
-                               dir = pct > 0.5 ? up : pct < -0.5 ? down : flat
-```
-
-### 7.3 Pace vs target (used in weekly view, optional in monthly)
-```
-expected_now = target * (days_elapsed / days_total)
-pace_pct = actual / expected_now * 100
-
-status:
-  pace_pct >= 110  → AHEAD
-  pace_pct >= 95   → ON TRACK
-  pace_pct >= 80   → WATCH
-  else             → BEHIND
-
-daily_needed = (target - actual) / days_left  (only if days_left > 0 and gap > 0)
-```
-
-### 7.4 Sparkline construction
-- SVG `<path>` with `stroke-linecap: round`, stroke-width 1.4
-- End point marked with small circle (r=1.8)
-- Color matches delta direction
-- ViewBox sized to passed w/h, `preserveAspectRatio="none"`
-- No fill area for top funnels (keep calm), small area fill OK for north star
-
----
-
-## 8. Region & period toggles
-
-### Region: Combined | ID | US
-
-Combined always = ID + US. When user edits a number while on Combined:
-```
-total = entry.id + entry.us
-if total === 0:
-  entry.id = newVal / 2; entry.us = newVal - entry.id
-else:
-  id_ratio = entry.id / total
-  entry.id = round(newVal * id_ratio)
-  entry.us = round(newVal - entry.id)
-```
-
-### Period: MTD | 30D | 90D | QTD
-
-In the prototype, period is a visual flag — trend buckets stay the same. In production:
-- Each period maps to a different time range
-- Dashboard_Summary should expose a parameter or have parallel ranges
-- Sparkline buckets:
-  - MTD / 30D → 8 weekly buckets
-  - 90D → 12 weekly buckets or 3 monthly
-  - QTD → 3 monthly buckets
-
----
-
-## 9. Build path — from prototype to production
-
-### Phase 1: Wire data
-1. Build Google Apps Script web app on the `yobolabs-dashboard-data.xlsx` (after import to Google Sheets) that returns `Dashboard_Summary` as JSON
-2. Dashboard fetches JSON on load, replaces in-memory `DATA` object
-3. Region/period toggles call same endpoint with parameters
-
-### Phase 2: Sync raw data
-- Acquisition_Daily ← HubSpot via Zapier or direct API
-- Activation_Cohorts ← product DB nightly job
-- Revenue_Customers ← Stripe webhooks + nightly Shopify attribution sync
-- CS_Weekly ← product analytics rollup (weekly cron)
-- Campaign_Performance ← Klaviyo API nightly
-
-### Phase 3: Frontend hardening
-- Replace in-memory state with React + state management (Zustand recommended for simplicity)
-- Real-time updates: WebSocket or polling on a 5-min interval
-- Hosted at `kpis.yobolabs.ai` behind SSO
-- Mobile-installable PWA
-
-### Phase 4: Action layer
-- Auto-suggestion becomes a queue: every amber/red feeds a task list
-- Override field syncs to a Notion or Linear ticket
-- Weekly digest email auto-generated from the dashboard state
-
----
-
-## 10. What NOT to do
-
-- Don't add color for decoration. Color = status only.
-- Don't add more than one font.
-- Don't crowd the top funnels with sparklines per conversion. That detail lives in CS Detail.
-- Don't write marketing copy in section titles or suggestions.
-- Don't show ARR or customer counts on any public surface. This is investor/internal only.
-- Don't add a chatbot, AI assistant overlay, or "insights" box. The auto-suggestion banner is the only AI surface.
-- Don't make region/period toggles dropdowns. They're segmented controls (button groups).
-
----
-
-## 11. Files in this handoff
-
-```
-yobolabs-dashboard.html              prototype, vanilla JS, single file
-yobolabs-dashboard-data.xlsx         data model with formulas
-SPEC.md                               this file
-```
-
-## 12. Open questions / future work
-
-- **Cohort math for activation**: currently activation counts use signup-date filter (cohort by month). Stricter "of customers who signed up week N, what % reached stage X by week N+1" requires a different query. Worth doing when data volume justifies.
-- **NRR computation**: currently hardcoded in Dashboard_Summary because it needs churn + expansion + contraction tracked separately. When Revenue_Customers includes those columns, swap the hardcode for a formula.
-- **Real-time vs daily refresh**: prototype assumes a snapshot. Production should decide refresh frequency per metric (Klaviyo: real-time, Stripe: hourly, product DB: nightly).
-- **Action override persistence**: override notes in the prototype are session-only. Production needs them stored (Notion, DB, or local-storage minimum).
-- **ID vs US side-by-side view**: currently region is a toggle. A parallel-column view (ID column | US column on the same page) is requested but deferred. Add when team is actively running both markets.
+After any change, verify on the live URL:
+1. Period toggle changes both values and sparkline bucket counts (8/8/12/3).
+2. Edit a number on Combined, switch to ID, confirm the proportional share. Reload, confirm it stuck.
+3. Write an action note, reload, confirm it stuck. Reset restores seed.
+4. Change ROI multiple, confirm the Revenue stage label follows.
+5. North star tiles show pace with status coloring only on watch or behind.
+6. Phone width: no wrapped numbers, north star 2x2, toggles scroll.
+7. No em dashes, exclamation marks, or emojis anywhere in copy.
